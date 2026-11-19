@@ -1,0 +1,19 @@
+{
+  "name": "whistlesong",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Turn any song into a whistled cover, entirely in your browser.",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "5.6.3",
+    "vite": "5.4.11",
+    "vitest": "2.1.8"
+  }
+}

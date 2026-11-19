@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#0f172a" />
+    <meta name="referrer" content="no-referrer" />
+    <title>WhistleSong</title>
+    <meta name="description" content="Turn any song into a whistled cover. Runs entirely in your browser; your music never leaves your device." />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%F0%9F%8E%B5%3C/text%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header>
+        <h1>WhistleSong</h1>
+        <p class="tagline">Drop in a song. Get it back, whistled.</p>
+      </header>
+
+      <section id="pick" class="card" aria-labelledby="pick-title">
+        <h2 id="pick-title" class="sr-only">Choose a song</h2>
+        <label class="drop" id="drop">
+          <input id="file" type="file" accept="audio/*,.mp3,.m4a,.wav,.ogg,.flac,.aac" />
+          <span class="drop-main">Choose a song</span>
+          <span class="drop-sub">or drop an audio file here · up to 5 minutes</span>
+        </label>
+        <p class="privacy">🔒 Everything happens on your device. Your music is never uploaded.</p>
+      </section>
+
+      <section id="work" class="card" hidden aria-live="polite">
+        <p id="file-name" class="file-name"></p>
+        <p id="stage" class="stage">Starting…</p>
+        <progress id="bar" max="100" value="0" aria-label="Progress"></progress>
+        <button id="cancel" type="button" class="btn secondary">Cancel</button>
+      </section>
+
+      <section id="result" class="card" hidden aria-labelledby="result-title">
+        <h2 id="result-title">Your whistled version</h2>
+        <audio id="whistle-audio" controls preload="auto"></audio>
+        <canvas id="roll" role="img" aria-label="Piano roll of the whistled melody" width="600" height="160"></canvas>
+        <p id="summary" class="summary"></p>
+        <div class="row">
+          <a id="download" class="btn" download="whistled.wav">Download WAV</a>
+          <button id="again" type="button" class="btn secondary">Another song</button>
+        </div>
+        <details>
+          <summary>Compare with the original</summary>
+          <audio id="orig-audio" controls preload="none"></audio>
+        </details>
+      </section>
+
+      <p id="error" class="error" role="alert" hidden></p>
+
+      <footer>
+        <p>Prototype · works best on songs with a clear lead melody.</p>
+      </footer>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
