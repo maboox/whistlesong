@@ -69,6 +69,10 @@ export function renderWhistle(
   const attackCoef = 1 - Math.exp(-blockSec / (WHISTLE.attackSec / 3));
   const releaseCoef = 1 - Math.exp(-blockSec / (WHISTLE.releaseSec / 3));
 
+  const wPhase1 = rnd() * 6.283;
+  const wPhase2 = rnd() * 6.283;
+  const vPhase = rnd() * 6.283;
+  const scoops = voices.map(() => 0.5 + 0.5 * rnd());
   let vi = 0; // index of current/next voice
   let phase = 0;
   let amp = 0;
@@ -109,8 +113,22 @@ export function renderWhistle(
     drift += (rnd() * 2 - 1 - drift) * 0.04;
     breathMod += (rnd() * 2 - 1 - (breathMod - 1)) * 0.05;
     const vibRamp = active ? smoothstep((tn - WHISTLE.vibratoDelaySec) / 0.25) : 0;
-    const vibCents = WHISTLE.vibratoCents * vibRamp * Math.sin(2 * Math.PI * WHISTLE.vibratoHz * t);
-    const cents = vibCents + drift * 3;
+    // Vibrato rate and depth breathe a little, as in a real (untrained) whistler.
+    const vibHz = WHISTLE.vibratoHz + 0.5 * Math.sin(2 * Math.PI * 0.37 * t + wPhase2);
+    const vibDepth = WHISTLE.vibratoCents * (0.8 + 0.2 * Math.sin(2 * Math.PI * 0.23 * t + wPhase1));
+    const vibSin = Math.sin(2 * Math.PI * vibHz * t + vPhase);
+    const vibCents = vibDepth * vibRamp * vibSin;
+    const wander =
+      WHISTLE.wanderCents * (0.6 * Math.sin(2 * Math.PI * 0.61 * t + wPhase1) + 0.4 * Math.sin(2 * Math.PI * 1.37 * t + wPhase2));
+    let shape = 0; // onset scoop and release sag (cents)
+    if (active && v && v.fresh) {
+      shape = -WHISTLE.scoopCents * scoops[vi]! * (1 - smoothstep(tn / WHISTLE.scoopSec));
+    } else if (!active && vi > 0) {
+      shape = -WHISTLE.sagCents * smoothstep((t - voices[vi - 1]!.end) / WHISTLE.releaseSec);
+    }
+    const cents = vibCents + wander + drift * 2 + shape;
+    // Amplitude follows the pitch wobble a little (tremolo of ~3 %).
+    const shimmer = 1 + 0.03 * vibRamp * vibSin;
     const hz = Math.exp(logHz) * Math.pow(2, cents / 1200);
 
     // --- breath noise filter coefficients ---
@@ -121,7 +139,9 @@ export function renderWhistle(
     const a1 = (-2 * Math.cos(w0)) / a0;
     const a2 = (1 - alpha) / a0;
     const chiff = active && v?.fresh ? Math.exp(-tn / 0.035) : 0;
-    const breathGain = amp * WHISTLE.breathLevel * (0.7 + 0.3 * breathMod) * (1 + 2.2 * chiff) * 3.2;
+    // Low whistled notes are breathier, high ones purer.
+    const airy = Math.min(1.5, Math.max(0.7, 1.5 - (hz - 500) / 2500));
+    const breathGain = amp * WHISTLE.breathLevel * airy * (0.7 + 0.3 * breathMod) * (1 + 4 * chiff) * 3.2;
 
     const i0 = b * BLOCK;
     const i1 = Math.min(total, i0 + BLOCK);
@@ -129,25 +149,58 @@ export function renderWhistle(
       const f = hzPrev + ((hz - hzPrev) * (i - i0 + 1)) / BLOCK;
       phase += (2 * Math.PI * f) / sr;
       if (phase > 2 * Math.PI) phase -= 2 * Math.PI;
-      const tone = Math.sin(phase) + 0.07 * Math.sin(2 * phase) + 0.025 * Math.sin(3 * phase);
+      const tone = Math.sin(phase) + WHISTLE.harmonic2 * Math.sin(2 * phase) + WHISTLE.harmonic3 * Math.sin(3 * phase);
       const nz = rnd() * 2 - 1;
       // Transposed direct form II band-pass (b1 = 0, b2 = -b0).
       const y = bb0 * nz + z1;
       z1 = z2 - a1 * y;
       z2 = -bb0 * nz - a2 * y;
-      out[i] = amp * tone + breathGain * y;
+      out[i] = amp * shimmer * tone + breathGain * y;
     }
     hzPrev = hz;
     if ((b & 1023) === 0) onProgress?.(b / nBlocks);
   }
 
-  // Gentle normalisation with a soft knee so loud passages never clip.
+  addRoom(out, sr, WHISTLE.reverbWet);
+
+  // Plain peak normalisation: a soft clipper here would add harmonics to a pure tone.
   let peak = 0;
   for (let i = 0; i < total; i++) peak = Math.max(peak, Math.abs(out[i]!));
   if (peak > 0) {
-    const g = 0.85 / peak;
-    for (let i = 0; i < total; i++) out[i] = Math.tanh(out[i]! * g * 1.1) * 0.95;
+    const g = 0.9 / peak;
+    for (let i = 0; i < total; i++) out[i] = out[i]! * g;
   }
   onProgress?.(1);
   return out;
+}
+
+/** Tiny Schroeder room (4 combs + 2 all-passes) mixed in place. */
+function addRoom(x: Float32Array, sr: number, wet: number): void {
+  if (wet <= 0) return;
+  const scale = sr / 44100;
+  const combLens = [1116, 1188, 1277, 1356].map((n) => Math.round(n * scale));
+  const apLens = [556, 441].map((n) => Math.round(n * scale));
+  const combs = combLens.map((n) => ({ buf: new Float32Array(n), i: 0, lp: 0 }));
+  const aps = apLens.map((n) => ({ buf: new Float32Array(n), i: 0 }));
+  const fb = 0.82;
+  const damp = 0.35;
+  for (let n = 0; n < x.length; n++) {
+    const dry = x[n]!;
+    let acc = 0;
+    for (const c of combs) {
+      const y = c.buf[c.i]!;
+      c.lp = y * (1 - damp) + c.lp * damp;
+      c.buf[c.i] = dry * 0.25 + c.lp * fb;
+      c.i = (c.i + 1) % c.buf.length;
+      acc += y;
+    }
+    for (const a of aps) {
+      const y = a.buf[a.i]!;
+      const w = acc + y * 0.5;
+      a.buf[a.i] = w;
+      acc = y - acc * 0.5;
+      a.i = (a.i + 1) % a.buf.length;
+    }
+    x[n] = dry * (1 - wet * 0.5) + acc * wet;
+  }
 }
