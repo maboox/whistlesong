@@ -22,11 +22,20 @@ interface Voice {
   glideFrom: number | null;
   /** true when this voice starts after silence (gets a breath "chiff"). */
   fresh: boolean;
+  // --- per-note human character (all drawn from the seeded PRNG) ---
+  pitchOffCents: number;
+  slopeCents: number; // slow drift across the note, cents per second
+  vibScale: number; // 0 = straight tone
+  glideSec: number;
+  scoop: number; // 0..1 of scoopCents
+  breath: number;
+  decay: number; // loudness fade across the note
 }
 
-function buildVoices(notes: Note[]): Voice[] {
+function buildVoices(notes: Note[], rnd: () => number): Voice[] {
   const sorted = [...notes].sort((a, b) => a.start - b.start);
   const voices: Voice[] = [];
+  const centered = (): number => rnd() + rnd() - 1; // triangular, -1..1
   for (const n of sorted) {
     const logHz = Math.log(midiToHz(n.midi));
     const prev = voices[voices.length - 1];
@@ -43,7 +52,23 @@ function buildVoices(notes: Note[]): Voice[] {
         fresh = false;
       }
     }
-    voices.push({ start, end: Math.max(start, n.end), logHz, gain: n.gain, glideFrom, fresh });
+    const dur = Math.max(0, n.end - start);
+    voices.push({
+      start,
+      end: Math.max(start, n.end),
+      logHz,
+      gain: Math.min(1, Math.max(0.05, n.gain * (1 + WHISTLE.gainSpread * centered()))),
+      glideFrom,
+      fresh,
+      pitchOffCents: WHISTLE.intonationCents * centered(),
+      slopeCents: 14 * centered(),
+      // Short notes are usually straight; longer ones sometimes get vibrato.
+      vibScale: dur < 0.35 ? 0 : rnd() < 0.3 ? 0 : 0.4 + 0.9 * rnd(),
+      glideSec: 0.03 + 0.05 * rnd(),
+      scoop: rnd() < 0.25 ? 0.1 : 0.4 + 0.6 * rnd(),
+      breath: 0.8 + 0.7 * rnd(),
+      decay: 0.2 * rnd(),
+    });
   }
   return voices;
 }
@@ -61,29 +86,34 @@ export function renderWhistle(
 ): Float32Array {
   const total = Math.max(1, Math.ceil((durationSec + WHISTLE.releaseSec * 3) * sr));
   const out = new Float32Array(total);
-  const voices = buildVoices(notes);
   const rnd = mulberry32(WHISTLE.seed);
+  const voices = buildVoices(notes, rnd);
   const BLOCK = 32;
   const blockSec = BLOCK / sr;
 
   const attackCoef = 1 - Math.exp(-blockSec / (WHISTLE.attackSec / 3));
   const releaseCoef = 1 - Math.exp(-blockSec / (WHISTLE.releaseSec / 3));
+  // Pressure noise: random walk low-passed to ~3 Hz.
+  const pressureCoef = 1 - Math.exp(-2 * Math.PI * 3 * blockSec);
 
   const wPhase1 = rnd() * 6.283;
   const wPhase2 = rnd() * 6.283;
   const vPhase = rnd() * 6.283;
-  const scoops = voices.map(() => 0.5 + 0.5 * rnd());
   let vi = 0; // index of current/next voice
   let phase = 0;
   let amp = 0;
-  let lastLogHz = voices[0]?.logHz ?? Math.log(1200);
+  let lastLogHz = voices[0]?.logHz ?? Math.log(900);
   let hzPrev = Math.exp(lastLogHz);
-  let drift = 0; // slow random pitch wander (cents)
+  let drift = 0;
+  let pressure = 0;
   let breathMod = 1;
-  // Band-pass (RBJ) state for breath noise.
+  // Narrow band-pass (RBJ) state for airy component around the pitch.
   let z1 = 0;
   let z2 = 0;
-  const Q = 7;
+  const Q = 12;
+  // One-pole high-pass state for lip/teeth hiss.
+  let hissLp = 0;
+  const hissAlpha = 1 - Math.exp((-2 * Math.PI * 2500) / sr);
 
   const nBlocks = Math.ceil(total / BLOCK);
   for (let b = 0; b < nBlocks; b++) {
@@ -95,53 +125,63 @@ export function renderWhistle(
     // --- target pitch (log Hz) ---
     let logHz = lastLogHz;
     let tn = 0;
+    let frac = 0;
     if (active && v) {
       tn = t - v.start;
+      frac = v.end > v.start ? tn / (v.end - v.start) : 0;
       logHz = v.logHz;
       if (v.glideFrom !== null) {
-        const g = smoothstep(tn / WHISTLE.portamentoSec);
+        const g = smoothstep(tn / v.glideSec);
         logHz = v.glideFrom + (v.logHz - v.glideFrom) * g;
       }
     }
     lastLogHz = logHz;
 
-    // --- amplitude envelope ---
-    const target = active && v ? v.gain * 0.5 : 0;
+    // --- slow random processes ---
+    drift += (rnd() * 2 - 1 - drift) * 0.04;
+    pressure += (rnd() * 2 - 1 - pressure) * pressureCoef;
+    breathMod += (rnd() * 2 - 1 - (breathMod - 1)) * 0.05;
+    const press = pressure * 6; // ~ unit variance after smoothing
+
+    // --- amplitude envelope (note loudness fades a little; pressure wobbles it) ---
+    const noteLevel = active && v ? v.gain * 0.5 * (1 - v.decay * Math.min(1, frac)) : 0;
+    const target = noteLevel * (1 + WHISTLE.pressureAmp * press);
     amp += (target - amp) * (target > amp ? attackCoef : releaseCoef);
 
-    // --- expressive modulation ---
-    drift += (rnd() * 2 - 1 - drift) * 0.04;
-    breathMod += (rnd() * 2 - 1 - (breathMod - 1)) * 0.05;
-    const vibRamp = active ? smoothstep((tn - WHISTLE.vibratoDelaySec) / 0.25) : 0;
-    // Vibrato rate and depth breathe a little, as in a real (untrained) whistler.
-    const vibHz = WHISTLE.vibratoHz + 0.5 * Math.sin(2 * Math.PI * 0.37 * t + wPhase2);
-    const vibDepth = WHISTLE.vibratoCents * (0.8 + 0.2 * Math.sin(2 * Math.PI * 0.23 * t + wPhase1));
+    // --- pitch expression ---
+    const vibRamp = active && v ? smoothstep((tn - WHISTLE.vibratoDelaySec) / 0.3) * v.vibScale : 0;
+    const vibHz = WHISTLE.vibratoHz + 0.6 * Math.sin(2 * Math.PI * 0.31 * t + wPhase2);
+    const vibDepth = WHISTLE.vibratoCents * (0.75 + 0.25 * Math.sin(2 * Math.PI * 0.19 * t + wPhase1));
     const vibSin = Math.sin(2 * Math.PI * vibHz * t + vPhase);
     const vibCents = vibDepth * vibRamp * vibSin;
     const wander =
-      WHISTLE.wanderCents * (0.6 * Math.sin(2 * Math.PI * 0.61 * t + wPhase1) + 0.4 * Math.sin(2 * Math.PI * 1.37 * t + wPhase2));
+      WHISTLE.wanderCents * (0.6 * Math.sin(2 * Math.PI * 0.53 * t + wPhase1) + 0.4 * Math.sin(2 * Math.PI * 1.31 * t + wPhase2));
     let shape = 0; // onset scoop and release sag (cents)
-    if (active && v && v.fresh) {
-      shape = -WHISTLE.scoopCents * scoops[vi]! * (1 - smoothstep(tn / WHISTLE.scoopSec));
-    } else if (!active && vi > 0) {
+    let noteCents = 0; // per-note intonation error and slow slope
+    if (active && v) {
+      noteCents = v.pitchOffCents + v.slopeCents * Math.min(tn, 1.2);
+      if (v.fresh) shape = -WHISTLE.scoopCents * v.scoop * (1 - smoothstep(tn / WHISTLE.scoopSec));
+    } else if (vi > 0) {
       shape = -WHISTLE.sagCents * smoothstep((t - voices[vi - 1]!.end) / WHISTLE.releaseSec);
+      noteCents = voices[vi - 1]!.pitchOffCents;
     }
-    const cents = vibCents + wander + drift * 2 + shape;
-    // Amplitude follows the pitch wobble a little (tremolo of ~3 %).
-    const shimmer = 1 + 0.03 * vibRamp * vibSin;
+    const cents = vibCents + wander + drift * 2 + WHISTLE.pressureCents * press + noteCents + shape;
     const hz = Math.exp(logHz) * Math.pow(2, cents / 1200);
+    const shimmer = 1 + 0.03 * vibRamp * vibSin;
 
-    // --- breath noise filter coefficients ---
+    // --- breath components ---
     const w0 = (2 * Math.PI * Math.min(hz, sr * 0.45)) / sr;
     const alpha = Math.sin(w0) / (2 * Q);
     const a0 = 1 + alpha;
     const bb0 = alpha / a0;
     const a1 = (-2 * Math.cos(w0)) / a0;
     const a2 = (1 - alpha) / a0;
-    const chiff = active && v?.fresh ? Math.exp(-tn / 0.035) : 0;
-    // Low whistled notes are breathier, high ones purer.
-    const airy = Math.min(1.5, Math.max(0.7, 1.5 - (hz - 500) / 2500));
-    const breathGain = amp * WHISTLE.breathLevel * airy * (0.7 + 0.3 * breathMod) * (1 + 4 * chiff) * 3.2;
+    const chiff = active && v?.fresh ? Math.exp(-tn / 0.04) : 0;
+    const airy = Math.min(1.6, Math.max(0.7, 1.7 - (hz - 450) / 1500)); // low notes breathier
+    const vb = v ? v.breath : 1;
+    const breathGain =
+      amp * WHISTLE.breathLevel * airy * vb * (0.7 + 0.3 * breathMod) * (1 + 5 * chiff) * 4 * (1 + 0.3 * press);
+    const hissGain = amp * WHISTLE.hissLevel * vb * (1 + 6 * chiff) * (1 + 0.3 * press);
 
     const i0 = b * BLOCK;
     const i1 = Math.min(total, i0 + BLOCK);
@@ -155,7 +195,9 @@ export function renderWhistle(
       const y = bb0 * nz + z1;
       z1 = z2 - a1 * y;
       z2 = -bb0 * nz - a2 * y;
-      out[i] = amp * shimmer * tone + breathGain * y;
+      hissLp += hissAlpha * (nz - hissLp);
+      const hiss = nz - hissLp;
+      out[i] = amp * shimmer * tone + breathGain * y + hissGain * hiss;
     }
     hzPrev = hz;
     if ((b & 1023) === 0) onProgress?.(b / nBlocks);
@@ -182,8 +224,8 @@ function addRoom(x: Float32Array, sr: number, wet: number): void {
   const apLens = [556, 441].map((n) => Math.round(n * scale));
   const combs = combLens.map((n) => ({ buf: new Float32Array(n), i: 0, lp: 0 }));
   const aps = apLens.map((n) => ({ buf: new Float32Array(n), i: 0 }));
-  const fb = 0.82;
-  const damp = 0.35;
+  const fb = 0.8;
+  const damp = 0.4;
   for (let n = 0; n < x.length; n++) {
     const dry = x[n]!;
     let acc = 0;

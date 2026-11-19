@@ -36,30 +36,37 @@ export const NOTES = {
 
 export const WHISTLE = {
   outputSampleRate: 24000,
-  /** Comfortable whistle centre (MIDI) and hard range. ~1.2 kHz centre. */
-  centerMidi: 86.4,
-  minMidi: 72, // ~523 Hz
-  maxMidi: 100, // ~2637 Hz
-  portamentoSec: 0.05,
+  /** Register: casual whistling lives around 0.7-2 kHz, lower sounds softer and more human. */
+  centerMidi: 81.5, // ~ 860 Hz
+  minMidi: 70, // ~ 466 Hz
+  maxMidi: 96, // ~ 2093 Hz
   maxGlideGapSec: 0.09,
-  attackSec: 0.035,
-  releaseSec: 0.09,
+  attackSec: 0.04,
+  releaseSec: 0.1,
   /** A human whistle is a nearly pure tone: very weak overtones (relative amplitude). */
   harmonic2: 0.03,
   harmonic3: 0.01,
-  vibratoHz: 5.4,
-  vibratoCents: 13,
-  vibratoDelaySec: 0.3,
-  /** Slow natural pitch wander (cents) so the tone never sounds "locked". */
-  wanderCents: 6,
+  vibratoHz: 5.0,
+  vibratoCents: 11,
+  vibratoDelaySec: 0.35,
+  /** Slow natural pitch wander (cents). */
+  wanderCents: 7,
+  /** Breath-pressure fluctuation: couples a little pitch and loudness movement. */
+  pressureCents: 6,
+  pressureAmp: 0.12,
+  /** Per-note "human error": each note gets its own random character. */
+  intonationCents: 9,
+  gainSpread: 0.14,
   /** Fresh notes start a little flat and scoop up (cents, max). */
-  scoopCents: 55,
-  scoopSec: 0.045,
+  scoopCents: 60,
+  scoopSec: 0.05,
   /** Pitch sags slightly as the breath dies away (cents). */
-  sagCents: 28,
-  /** Hiss relative to the tone: about -35 dB or lower in steady state. */
-  breathLevel: 0.014,
-  /** Small room so it does not sound like a dry test tone. */
-  reverbWet: 0.12,
+  sagCents: 30,
+  /** Narrow airy component around the pitch (relative to tone). */
+  breathLevel: 0.03,
+  /** Broadband hiss (above ~2.5 kHz) from the lips/teeth. */
+  hissLevel: 0.012,
+  /** Dry, close-mic feel. A hall-like reverb makes it sound like a flute. */
+  reverbWet: 0.04,
   seed: 1337,
 } as const;

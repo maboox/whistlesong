@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ANALYSIS } from "../src/config";
+import { ANALYSIS, WHISTLE } from "../src/config";
 import { extractMelody } from "../src/dsp/melody";
 import { fitToWhistleRange } from "../src/dsp/range";
 import { segmentNotes } from "../src/dsp/notes";
@@ -70,11 +70,11 @@ describe("range fitting", () => {
     const fitted = fitToWhistleRange(low);
     fitted.forEach((n, i) => {
       expect((n.midi - low[i]!.midi) % 12).toBe(0);
-      expect(n.midi).toBeGreaterThanOrEqual(72);
-      expect(n.midi).toBeLessThanOrEqual(100);
+      expect(n.midi).toBeGreaterThanOrEqual(WHISTLE.minMidi);
+      expect(n.midi).toBeLessThanOrEqual(WHISTLE.maxMidi);
     });
     const hz = midiToHz(fitted[0]!.midi);
-    expect(hz).toBeGreaterThan(500);
+    expect(hz).toBeGreaterThan(440);
     expect(hzToMidi(hz)).toBeCloseTo(fitted[0]!.midi);
   });
 });
