@@ -34,39 +34,47 @@ export const NOTES = {
   bridgeGapSec: 0.06,
 } as const;
 
+/**
+ * Values below were measured from a real human whistle recording
+ * (docs/WHISTLE_REFERENCE.md). Re-measure before changing them.
+ */
 export const WHISTLE = {
   outputSampleRate: 24000,
-  /** Register: casual whistling lives around 0.7-2 kHz, lower sounds softer and more human. */
-  centerMidi: 81.5, // ~ 860 Hz
+  /** Register: the reference whistler lived at 785-1415 Hz, median ~1030 Hz. */
+  centerMidi: 83.2, // ~ 1000 Hz
   minMidi: 70, // ~ 466 Hz
-  maxMidi: 96, // ~ 2093 Hz
-  maxGlideGapSec: 0.09,
-  attackSec: 0.04,
+  maxMidi: 94, // ~ 1480 Hz
+  maxGlideGapSec: 0.06,
+  attackSec: 0.025,
   releaseSec: 0.1,
-  /** A human whistle is a nearly pure tone: very weak overtones (relative amplitude). */
-  harmonic2: 0.03,
-  harmonic3: 0.01,
+  /** Overtones relative to the fundamental: measured -40 dB (2nd) and -58 dB (3rd). */
+  harmonic2: 0.01,
+  harmonic3: 0.0015,
+  /** Real whistling has little regular vibrato: only a few long notes, and shallow. */
   vibratoHz: 5.0,
-  vibratoCents: 11,
+  vibratoCents: 8,
+  vibratoShare: 0.15,
   vibratoDelaySec: 0.35,
   /** Slow natural pitch wander (cents). */
-  wanderCents: 7,
+  wanderCents: 6,
   /** Breath-pressure fluctuation: couples a little pitch and loudness movement. */
-  pressureCents: 6,
+  pressureCents: 7,
   pressureAmp: 0.12,
   /** Per-note "human error": each note gets its own random character. */
   intonationCents: 9,
+  /** Notes drift in pitch while held: measured up to ~200 cents/second. */
+  driftCentsPerSec: 200,
   gainSpread: 0.14,
-  /** Fresh notes start a little flat and scoop up (cents, max). */
-  scoopCents: 60,
-  scoopSec: 0.05,
-  /** Pitch sags slightly as the breath dies away (cents). */
-  sagCents: 30,
-  /** Narrow airy component around the pitch (relative to tone). */
-  breathLevel: 0.03,
-  /** Broadband hiss (above ~2.5 kHz) from the lips/teeth. */
-  hissLevel: 0.012,
+  /** Onsets show no consistent scoop in the reference; only a small random one. */
+  scoopCents: 20,
+  scoopSec: 0.06,
+  /** No consistent sag at the end of notes in the reference. */
+  sagCents: 8,
+  /** Airy skirt around the pitch (measured about -33 dB). */
+  breathLevel: 0.06,
+  /** Hiss above 3 kHz is almost absent in real whistles (measured about -56 dB). */
+  hissLevel: 0.0008,
   /** Dry, close-mic feel. A hall-like reverb makes it sound like a flute. */
-  reverbWet: 0.04,
+  reverbWet: 0.02,
   seed: 1337,
 } as const;

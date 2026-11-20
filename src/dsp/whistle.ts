@@ -61,9 +61,9 @@ function buildVoices(notes: Note[], rnd: () => number): Voice[] {
       glideFrom,
       fresh,
       pitchOffCents: WHISTLE.intonationCents * centered(),
-      slopeCents: 14 * centered(),
+      slopeCents: WHISTLE.driftCentsPerSec * centered(),
       // Short notes are usually straight; longer ones sometimes get vibrato.
-      vibScale: dur < 0.35 ? 0 : rnd() < 0.3 ? 0 : 0.4 + 0.9 * rnd(),
+      vibScale: dur < 0.35 || rnd() > WHISTLE.vibratoShare ? 0 : 0.5 + 0.8 * rnd(),
       glideSec: 0.03 + 0.05 * rnd(),
       scoop: rnd() < 0.25 ? 0.1 : 0.4 + 0.6 * rnd(),
       breath: 0.8 + 0.7 * rnd(),
@@ -159,7 +159,7 @@ export function renderWhistle(
     let shape = 0; // onset scoop and release sag (cents)
     let noteCents = 0; // per-note intonation error and slow slope
     if (active && v) {
-      noteCents = v.pitchOffCents + v.slopeCents * Math.min(tn, 1.2);
+      noteCents = v.pitchOffCents + v.slopeCents * Math.min(tn, 1.5);
       if (v.fresh) shape = -WHISTLE.scoopCents * v.scoop * (1 - smoothstep(tn / WHISTLE.scoopSec));
     } else if (vi > 0) {
       shape = -WHISTLE.sagCents * smoothstep((t - voices[vi - 1]!.end) / WHISTLE.releaseSec);
