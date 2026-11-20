@@ -73,7 +73,9 @@ export const WHISTLE = {
   /** Airy skirt around the pitch (measured about -33 dB). */
   breathLevel: 0.06,
   /** Hiss above 3 kHz is almost absent in real whistles (measured about -56 dB). */
-  hissLevel: 0.0008,
+  hissLevel: 0.0004,
+  /** Broadband breath puff at each fresh note onset (gain multiplier on the hiss); seen as a "cone" in the reference spectrogram. */
+  onsetPuff: 90,
   /** Dry, close-mic feel. A hall-like reverb makes it sound like a flute. */
   reverbWet: 0.02,
   seed: 1337,

@@ -113,7 +113,7 @@ export function renderWhistle(
   const Q = 12;
   // One-pole high-pass state for lip/teeth hiss.
   let hissLp = 0;
-  const hissAlpha = 1 - Math.exp((-2 * Math.PI * 2500) / sr);
+  const hissAlpha = 1 - Math.exp((-2 * Math.PI * 1000) / sr);
 
   const nBlocks = Math.ceil(total / BLOCK);
   for (let b = 0; b < nBlocks; b++) {
@@ -176,12 +176,13 @@ export function renderWhistle(
     const bb0 = alpha / a0;
     const a1 = (-2 * Math.cos(w0)) / a0;
     const a2 = (1 - alpha) / a0;
-    const chiff = active && v?.fresh ? Math.exp(-tn / 0.04) : 0;
+    // Tongue/breath puff at the start of a fresh note: a broadband burst that dies in ~100 ms.
+    const chiff = active && v?.fresh ? Math.exp(-tn / 0.05) : 0;
     const airy = Math.min(1.6, Math.max(0.7, 1.7 - (hz - 450) / 1500)); // low notes breathier
     const vb = v ? v.breath : 1;
     const breathGain =
       amp * WHISTLE.breathLevel * airy * vb * (0.7 + 0.3 * breathMod) * (1 + 5 * chiff) * 4 * (1 + 0.3 * press);
-    const hissGain = amp * WHISTLE.hissLevel * vb * (1 + 6 * chiff) * (1 + 0.3 * press);
+    const hissGain = amp * WHISTLE.hissLevel * vb * (1 + WHISTLE.onsetPuff * chiff) * (1 + 0.3 * press);
 
     const i0 = b * BLOCK;
     const i1 = Math.min(total, i0 + BLOCK);

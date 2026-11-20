@@ -8,7 +8,7 @@ Tools: `tools/whistle_stats.py`, `tools/whistle_notes.py` (numpy). Re-run them o
 | Pitch range (voiced) | 785–1415 Hz, median 1028 Hz | 779–1414 Hz, median 1035 Hz |
 | 2nd harmonic vs fundamental | −40 dB (median) | −40 dB |
 | 3rd harmonic | −58 dB | −56 dB |
-| Hiss 3–10 kHz | −52 dB | −53 dB |
+| Hiss 3–10 kHz | −52 dB (steady) plus a broadband puff at each note onset | low steady hiss + onset puff (`onsetPuff`) |
 | Noise around the pitch (800–1500 Hz band) | −33 dB | −35 dB |
 | Regular vibrato | essentially none; irregular ~3 Hz wobble, ~±15 cents | only ~15 % of long notes, ±8 cents |
 | Pitch drift while holding a note | median 66 cents/s, up to ~280 | up to ±200 cents/s per note |
