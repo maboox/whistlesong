@@ -11,6 +11,11 @@ export interface Note {
    */
   bend?: Float32Array;
   bendHopSec?: number;
+  /**
+   * Set when this note is the landing of a continuous glide from the previous note
+   * (fast sweeps were merged): seconds the pitch should take to travel there.
+   */
+  glideSec?: number;
 }
 
 /** Frame-level melody estimate. `midi` is NaN where no melody was found. */

@@ -52,7 +52,48 @@ export function segmentNotes(track: MelodyTrack): Note[] {
     }
     t = e;
   }
-  return notes;
+  return dropIsolatedBlips(mergeSweeps(notes));
+}
+
+function dropIsolatedBlips(notes: Note[]): Note[] {
+  return notes.filter((n, i) => {
+    if (n.end - n.start >= NOTES.isolatedMinSec) return true;
+    const prev = notes[i - 1];
+    const next = notes[i + 1];
+    const lonelyBefore = !prev || n.start - prev.end > NOTES.isolatedGapSec;
+    const lonelyAfter = !next || next.start - n.end > NOTES.isolatedGapSec;
+    return !(lonelyBefore && lonelyAfter);
+  });
+}
+
+/**
+ * Fast pitch sweeps (whistle swoops, singer slides) get chopped into several short,
+ * moving "notes". Replace them by one smooth glide between the stable notes either side.
+ */
+function mergeSweeps(notes: Note[]): Note[] {
+  const out = [...notes];
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let i = 1; i < out.length - 1; i++) {
+      const a = out[i - 1]!;
+      const b = out[i]!;
+      const c = out[i + 1]!;
+      const dur = b.end - b.start;
+      if (dur > NOTES.sweepMaxNoteSec) continue;
+      if (b.start - a.end > NOTES.sweepMaxGapSec || c.start - b.end > NOTES.sweepMaxGapSec) continue;
+      const monotonic = (a.midi <= b.midi && b.midi <= c.midi) || (a.midi >= b.midi && b.midi >= c.midi);
+      if (!monotonic || Math.abs(c.midi - a.midi) < 2) continue;
+      const bend = b.bend;
+      const moving = bend && bend.length > 1 ? (Math.abs(bend[bend.length - 1]! - bend[0]!) / Math.max(dur, 0.02)) >= NOTES.sweepCentsPerSec : false;
+      if (!moving) continue;
+      out.splice(i, 1);
+      c.glideSec = c.start - a.end;
+      changed = true;
+      break;
+    }
+  }
+  return out;
 }
 
 /** Split [s,e) where the strength dips and rises again (repeated notes). */

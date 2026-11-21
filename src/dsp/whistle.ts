@@ -48,7 +48,8 @@ function buildVoices(notes: Note[], rnd: () => number, human: number): Voice[] {
       // Never overlap: this is a single whistle.
       if (start < prev.end) prev.end = Math.max(prev.start, start);
       const gap = start - prev.end;
-      if (gap <= WHISTLE.maxGlideGapSec && Math.abs(logHz - prev.logHz) > 1e-6) {
+      const maxGap = n.glideSec !== undefined ? WHISTLE.maxSweepSec : WHISTLE.maxGlideGapSec;
+      if (gap <= maxGap && Math.abs(logHz - prev.logHz) > 1e-6) {
         glideFrom = prev.logHz;
         start = prev.end; // legato: no silence between
         fresh = false;
@@ -66,8 +67,8 @@ function buildVoices(notes: Note[], rnd: () => number, human: number): Voice[] {
       slopeCents: human * WHISTLE.driftCentsPerSec * centered(),
       // Short notes are usually straight; longer ones sometimes get vibrato.
       vibScale: human === 0 || dur < 0.35 || rnd() > WHISTLE.vibratoShare ? 0 : 0.5 + 0.8 * rnd(),
-      glideSec: 0.04 + 0.07 * rnd(),
-      scoopCents: human > 0 && rnd() < WHISTLE.scoopProb ? WHISTLE.scoopMinCents + (WHISTLE.scoopMaxCents - WHISTLE.scoopMinCents) * rnd() : 0,
+      glideSec: n.glideSec !== undefined ? Math.min(WHISTLE.maxSweepSec, Math.max(0.06, n.glideSec)) : 0.04 + 0.07 * rnd(),
+      scoopCents: human > 0 && dur >= WHISTLE.minExpressiveNoteSec && rnd() < WHISTLE.scoopProb ? WHISTLE.scoopMinCents + (WHISTLE.scoopMaxCents - WHISTLE.scoopMinCents) * rnd() : 0,
       bend: n.bend ?? null,
       bendHopSec: n.bendHopSec ?? 0.02,
       breath: 0.8 + 0.7 * rnd(),
@@ -194,12 +195,13 @@ export function renderWhistle(
     const a1 = (-2 * Math.cos(w0)) / a0;
     const a2 = (1 - alpha) / a0;
     // Tongue/breath puff at the start of a fresh note: a broadband burst that dies in ~100 ms.
+    const puffScale = v ? Math.min(1, 0.3 + (0.7 * (v.end - v.start)) / WHISTLE.minExpressiveNoteSec) : 1;
     const chiff = active && v?.fresh ? Math.exp(-tn / 0.05) : 0;
     const airy = Math.min(1.6, Math.max(0.7, 1.7 - (hz - 450) / 1500)); // low notes breathier
     const vb = v ? v.breath : 1;
     const breathGain =
-      amp * WHISTLE.breathLevel * airy * vb * (0.7 + 0.3 * breathMod) * (1 + 5 * chiff) * 4 * (1 + 0.3 * press);
-    const hissGain = amp * WHISTLE.hissLevel * vb * (1 + WHISTLE.onsetPuff * chiff) * (1 + 0.3 * press);
+      amp * WHISTLE.breathLevel * airy * vb * (0.7 + 0.3 * breathMod) * (1 + 5 * chiff * puffScale) * 4 * (1 + 0.3 * press);
+    const hissGain = amp * WHISTLE.hissLevel * vb * (1 + WHISTLE.onsetPuff * chiff * puffScale) * (1 + 0.3 * press);
 
     const i0 = b * BLOCK;
     const i1 = Math.min(total, i0 + BLOCK);

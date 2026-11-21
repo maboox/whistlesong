@@ -46,6 +46,23 @@ describe("melody analysis", () => {
     expect(Math.max(...bend) - Math.min(...bend)).toBeGreaterThan(40);
   });
 
+  it("turns a fast sweep into one glide instead of chirpy fragments", () => {
+    // hold 72 (C5), sweep up an octave in ~0.3 s, hold 84.
+    const sr = SR, n = Math.floor(sr * 2);
+    const x = new Float32Array(n);
+    let ph = 0;
+    for (let i = 0; i < n; i++) {
+      const t = i / sr;
+      const m = t < 0.6 ? 72 : t < 0.9 ? 72 + (12 * (t - 0.6)) / 0.3 : 84;
+      ph += (2 * Math.PI * midiToHz(m)) / sr;
+      x[i] = 0.3 * (Math.sin(ph) + 0.4 * Math.sin(2 * ph));
+    }
+    const notes = segmentNotes(extractMelody(x, SR));
+    expect(notes.length).toBeLessThanOrEqual(3);
+    expect(notes[0]!.midi).toBe(72);
+    expect(notes[notes.length - 1]!.midi).toBe(84);
+  });
+
   it("does not split a steady note", () => {
     const notes = segmentNotes(extractMelody(tone(SR, 2, [{ hz: midiToHz(64), start: 0.1, end: 1.9, amp: 0.3 }]), SR));
     expect(notes.length).toBe(1);

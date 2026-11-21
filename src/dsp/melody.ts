@@ -38,6 +38,13 @@ export function extractMelody(x: Float32Array, sr: number, opts: ExtractOptions 
     candPos.push(pos);
     candCount.push(n);
   }
+  // Register prior (log-frequency ramp) so bass lines don't beat the melody.
+  const prior = new Float64Array(B);
+  for (let c = 0; c < B; c++) {
+    const f = ANALYSIS.fMinHz * Math.pow(2, (c * ANALYSIS.centsPerBin) / 1200);
+    const r = Math.log2(f / ANALYSIS.priorLowHz) / Math.log2(ANALYSIS.priorFullHz / ANALYSIS.priorLowHz);
+    prior[c] = ANALYSIS.priorLowWeight + (1 - ANALYSIS.priorLowWeight) * Math.min(1, Math.max(0, r));
+  }
   const weights = new Float64Array(ANALYSIS.harmonics);
   for (let h = 0; h < ANALYSIS.harmonics; h++) weights[h] = Math.pow(ANALYSIS.harmonicDecay, h);
 
@@ -77,7 +84,7 @@ export function extractMelody(x: Float32Array, sr: number, opts: ExtractOptions 
         const fr = p - i0;
         s += weights[h]! * (white[i0]! * (1 - fr) + white[i0 + 1]! * fr);
       }
-      sal[base + c] = s;
+      sal[base + c] = s * prior[c]!;
     }
   };
 

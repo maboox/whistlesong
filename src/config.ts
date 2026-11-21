@@ -18,6 +18,13 @@ export const ANALYSIS = {
   centsPerBin: 25,
   harmonics: 12,
   harmonicDecay: 0.85,
+  /**
+   * Melody register prior: candidates below `priorLowHz` are down-weighted (bass lines and chord roots
+   * otherwise win), reaching full weight at `priorFullHz`. Floor is `priorLowWeight`.
+   */
+  priorLowHz: 150,
+  priorFullHz: 500,
+  priorLowWeight: 0.15,
   /** Normalised salience below this is treated as "no melody here". */
   voicingThreshold: 0.12,
   /** Max pitch change (bins) the tracker follows smoothly between frames. */
@@ -27,6 +34,13 @@ export const ANALYSIS = {
 } as const;
 
 export const NOTES = {
+  /** Short notes that are really part of a sweep (moving faster than this, cents/s) become one glide. */
+  sweepCentsPerSec: 400,
+  sweepMaxNoteSec: 0.16,
+  sweepMaxGapSec: 0.05,
+  /** Isolated blips (no neighbour within `isolatedGapSec`) shorter than this are tracker noise, not notes. */
+  isolatedMinSec: 0.14,
+  isolatedGapSec: 0.15,
   /** Keep this much of the source's in-note pitch movement (clamped), see Note.bend. */
   bendMaxCents: 120,
   /** Hysteresis before a new pitch is accepted (semitones). */
@@ -47,6 +61,10 @@ export const WHISTLE = {
   minMidi: 70, // ~ 466 Hz
   maxMidi: 94, // ~ 1480 Hz
   maxGlideGapSec: 0.12,
+  /** Longest explicit glide (merged sweep) we will draw as one continuous curve. */
+  maxSweepSec: 0.4,
+  /** Notes shorter than this get no scoop and a weaker breath puff (they sounded like alien chirps). */
+  minExpressiveNoteSec: 0.2,
   attackSec: 0.02,
   releaseSec: 0.06,
   /** Overtones relative to the fundamental: measured -40 dB (2nd) and -58 dB (3rd). */
