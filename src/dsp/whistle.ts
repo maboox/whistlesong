@@ -28,34 +28,70 @@ interface Voice {
   vibScale: number; // 0 = straight tone
   glideSec: number;
   scoopCents: number; // flat start, recovered over scoopSec (0 = none)
+  scoopSec: number;
+  /** Pitch fall while the note dies away (cents, positive = down) and its duration. */
+  fallCents: number;
+  fallSec: number;
   bend: Float32Array | null;
   bendHopSec: number;
   breath: number;
   decay: number; // loudness fade across the note
 }
 
+type Transition = "slur" | "dip" | "gap";
+
+/**
+ * Plan how a real whistler would connect each note to the next one. Measured on
+ * real recordings (docs/WHISTLE_REFERENCE.md): most note changes have a short silence
+ * (re-articulation), a few are tongued "dips", only ~20 % are slurred glides.
+ */
+function planTransitions(notes: Note[], rnd: () => number, human: number): Transition[] {
+  return notes.map((n, i) => {
+    const next = notes[i + 1];
+    if (!next) return "gap";
+    if (next.glideSec !== undefined) return "slur"; // a sweep in the source: keep it continuous
+    if (human === 0) return next.start - n.end <= WHISTLE.maxGlideGapSec && next.midi !== n.midi ? "slur" : "gap";
+    const r = rnd();
+    if (r < WHISTLE.slurProb && next.midi !== n.midi) return "slur";
+    if (r < WHISTLE.slurProb + WHISTLE.dipProb) return "dip";
+    return "gap";
+  });
+}
+
 function buildVoices(notes: Note[], rnd: () => number, human: number): Voice[] {
-  const sorted = [...notes].sort((a, b) => a.start - b.start);
+  const sorted = [...notes].sort((a, b) => a.start - b.start).map((n) => ({ ...n }));
+  const plan = planTransitions(sorted, rnd, human);
+  // Shorten notes so the planned silence fits, as a whistler steals time from the note.
+  sorted.forEach((n, i) => {
+    const next = sorted[i + 1];
+    if (!next || plan[i] === "slur") return;
+    const want = plan[i] === "dip" ? WHISTLE.dipSec : WHISTLE.gapMinSec + (WHISTLE.gapMaxSec - WHISTLE.gapMinSec) * rnd();
+    const dur = n.end - n.start;
+    const latestEnd = next.start - want;
+    const minEnd = n.start + Math.max(WHISTLE.minHeldSec, dur * WHISTLE.minHeldShare);
+    if (n.end > latestEnd) n.end = Math.max(minEnd, Math.min(n.end, latestEnd));
+    if (n.end > next.start) n.end = next.start;
+  });
+
   const voices: Voice[] = [];
   const centered = (): number => rnd() + rnd() - 1; // triangular, -1..1
-  for (const n of sorted) {
+  sorted.forEach((n, i) => {
     const logHz = Math.log(midiToHz(n.midi));
     const prev = voices[voices.length - 1];
     let start = n.start;
     let glideFrom: number | null = null;
     let fresh = true;
-    if (prev) {
-      // Never overlap: this is a single whistle.
+    if (prev && plan[i - 1] === "slur") {
       if (start < prev.end) prev.end = Math.max(prev.start, start);
-      const gap = start - prev.end;
-      const maxGap = n.glideSec !== undefined ? WHISTLE.maxSweepSec : WHISTLE.maxGlideGapSec;
-      if (gap <= maxGap && Math.abs(logHz - prev.logHz) > 1e-6) {
-        glideFrom = prev.logHz;
-        start = prev.end; // legato: no silence between
-        fresh = false;
-      }
+      glideFrom = prev.logHz;
+      start = prev.end; // legato: no silence between
+      fresh = false;
+    } else if (prev && start < prev.end) {
+      prev.end = Math.max(prev.start, start);
     }
     const dur = Math.max(0, n.end - start);
+    const endsInSilence = plan[i] !== "slur";
+    const bigFall = human > 0 && endsInSilence && rnd() < WHISTLE.fallProb;
     voices.push({
       start,
       end: Math.max(start, n.end),
@@ -68,13 +104,24 @@ function buildVoices(notes: Note[], rnd: () => number, human: number): Voice[] {
       // Short notes are usually straight; longer ones sometimes get vibrato.
       vibScale: human === 0 || dur < 0.35 || rnd() > WHISTLE.vibratoShare ? 0 : 0.5 + 0.8 * rnd(),
       glideSec: n.glideSec !== undefined ? Math.min(WHISTLE.maxSweepSec, Math.max(0.06, n.glideSec)) : 0.04 + 0.07 * rnd(),
-      scoopCents: human > 0 && dur >= WHISTLE.minExpressiveNoteSec && rnd() < WHISTLE.scoopProb ? WHISTLE.scoopMinCents + (WHISTLE.scoopMaxCents - WHISTLE.scoopMinCents) * rnd() : 0,
+      // Scoop size is skewed: mostly small, sometimes a big slide from below.
+      scoopCents:
+        human > 0 && fresh && dur >= WHISTLE.minExpressiveNoteSec && rnd() < WHISTLE.scoopProb
+          ? WHISTLE.scoopMinCents * Math.exp(Math.log(WHISTLE.scoopMaxCents / WHISTLE.scoopMinCents) * rnd() * rnd())
+          : 0,
+      scoopSec: WHISTLE.scoopSec * (0.7 + 0.8 * rnd()),
+      fallCents: !endsInSilence || human === 0
+        ? 0
+        : bigFall
+          ? WHISTLE.fallMinCents + (WHISTLE.fallMaxCents - WHISTLE.fallMinCents) * rnd()
+          : WHISTLE.droopCents * (0.3 + 1.2 * rnd()),
+      fallSec: WHISTLE.fallSec * (0.7 + 0.6 * rnd()),
       bend: n.bend ?? null,
       bendHopSec: n.bendHopSec ?? 0.02,
       breath: 0.8 + 0.7 * rnd(),
       decay: 0.2 * rnd(),
     });
-  }
+  });
   return voices;
 }
 
@@ -116,13 +163,26 @@ export function renderWhistle(
   let amp = 0;
   let lastLogHz = voices[0]?.logHz ?? Math.log(900);
   let hzPrev = Math.exp(lastLogHz);
+  let toneGainPrev = 0; // per-sample interpolation avoids block-rate amplitude steps (zipper noise)
   let drift = 0;
   let pressure = 0;
   let breathMod = 1;
+  // Turbulent flutter (~3-25 Hz band-pass noise) on loudness and pitch, as measured on real whistles.
+  const fastCoef = 1 - Math.exp(-2 * Math.PI * 25 * blockSec);
+  const slowCoef = 1 - Math.exp(-2 * Math.PI * 3 * blockSec);
+  // Pitch wobble is slower (3-12 Hz): measured 5-17 cents in the 4-8 Hz band.
+  const pFastCoef = 1 - Math.exp(-2 * Math.PI * 12 * blockSec);
+  const pNorm = Math.sqrt(3) / Math.sqrt(Math.max(1e-6, pFastCoef / (2 - pFastCoef) - slowCoef / (2 - slowCoef)));
+  let aFast = 0, aSlow = 0, pFast = 0, pSlow = 0;
+  // Normalise band-pass noise to unit RMS (white uniform noise has RMS 1/sqrt(3)).
+  const bpNorm = Math.sqrt(3) / Math.sqrt(Math.max(1e-6, fastCoef / (2 - fastCoef) - slowCoef / (2 - slowCoef)));
   // Narrow band-pass (RBJ) state for airy component around the pitch.
   let z1 = 0;
   let z2 = 0;
-  const Q = 12;
+  // Second identical stage: real breath noise hugs the pitch and falls off steeply (measured skirt).
+  let z3 = 0;
+  let z4 = 0;
+  const Q = 8;
   // One-pole high-pass state for lip/teeth hiss.
   let hissLp = 0;
   const hissAlpha = 1 - Math.exp((-2 * Math.PI * 1000) / sr);
@@ -154,6 +214,14 @@ export function renderWhistle(
     pressure += (rnd() * 2 - 1 - pressure) * pressureCoef;
     breathMod += (rnd() * 2 - 1 - (breathMod - 1)) * 0.05;
     const press = pressure * 6; // ~ unit variance after smoothing
+    const wa = rnd() * 2 - 1;
+    aFast += (wa - aFast) * fastCoef;
+    aSlow += (wa - aSlow) * slowCoef;
+    const wp = rnd() * 2 - 1;
+    pFast += (wp - pFast) * pFastCoef;
+    pSlow += (wp - pSlow) * slowCoef;
+    const flutterDb = human * WHISTLE.flutterDb * (aFast - aSlow) * bpNorm;
+    const flutterCents = human * WHISTLE.flutterCents * (pFast - pSlow) * pNorm;
 
     // --- amplitude envelope (note loudness fades a little; pressure wobbles it) ---
     const noteLevel = active && v ? v.gain * 0.5 * (1 - v.decay * Math.min(1, frac)) : 0;
@@ -172,7 +240,7 @@ export function renderWhistle(
     let noteCents = 0; // per-note intonation error and slow slope
     if (active && v) {
       noteCents = v.pitchOffCents + v.slopeCents * Math.min(tn, 1.5);
-      if (v.fresh) shape = -v.scoopCents * (1 - smoothstep(tn / WHISTLE.scoopSec));
+      if (v.fresh) shape = -v.scoopCents * (1 - smoothstep(tn / v.scoopSec));
       if (v.bend && v.bend.length > 0) {
         const pos = Math.min(v.bend.length - 1, tn / v.bendHopSec);
         const i0 = Math.floor(pos);
@@ -180,12 +248,13 @@ export function renderWhistle(
         shape += human * WHISTLE.bendShare * (v.bend[i0]! + (v.bend[i1]! - v.bend[i0]!) * (pos - i0));
       }
     } else if (vi > 0) {
-      shape = -WHISTLE.sagCents * smoothstep((t - voices[vi - 1]!.end) / WHISTLE.releaseSec);
+      const pv = voices[vi - 1]!;
+      shape = -pv.fallCents * smoothstep((t - pv.end) / pv.fallSec);
       noteCents = voices[vi - 1]!.pitchOffCents;
     }
-    const cents = vibCents + human * (wander + drift * 2 + WHISTLE.pressureCents * press) + noteCents + shape;
+    const cents = vibCents + human * (wander + drift * 2 + WHISTLE.pressureCents * press) + flutterCents + noteCents + shape;
     const hz = Math.exp(logHz) * Math.pow(2, cents / 1200);
-    const shimmer = 1 + 0.03 * vibRamp * vibSin;
+    const shimmer = (1 + 0.03 * vibRamp * vibSin) * Math.pow(10, flutterDb / 20);
 
     // --- breath components ---
     const w0 = (2 * Math.PI * Math.min(hz, sr * 0.45)) / sr;
@@ -203,10 +272,13 @@ export function renderWhistle(
       amp * WHISTLE.breathLevel * airy * vb * (0.7 + 0.3 * breathMod) * (1 + 5 * chiff * puffScale) * 4 * (1 + 0.3 * press);
     const hissGain = amp * WHISTLE.hissLevel * vb * (1 + WHISTLE.onsetPuff * chiff * puffScale) * (1 + 0.3 * press);
 
+    const toneGain = amp * shimmer;
     const i0 = b * BLOCK;
     const i1 = Math.min(total, i0 + BLOCK);
     for (let i = i0; i < i1; i++) {
-      const f = hzPrev + ((hz - hzPrev) * (i - i0 + 1)) / BLOCK;
+      const frac = (i - i0 + 1) / BLOCK;
+      const f = hzPrev + (hz - hzPrev) * frac;
+      const tg = toneGainPrev + (toneGain - toneGainPrev) * frac;
       phase += (2 * Math.PI * f) / sr;
       if (phase > 2 * Math.PI) phase -= 2 * Math.PI;
       const tone = Math.sin(phase) + WHISTLE.harmonic2 * Math.sin(2 * phase) + WHISTLE.harmonic3 * Math.sin(3 * phase);
@@ -215,11 +287,15 @@ export function renderWhistle(
       const y = bb0 * nz + z1;
       z1 = z2 - a1 * y;
       z2 = -bb0 * nz - a2 * y;
+      const y2 = bb0 * y + z3;
+      z3 = z4 - a1 * y2;
+      z4 = -bb0 * y - a2 * y2;
       hissLp += hissAlpha * (nz - hissLp);
       const hiss = nz - hissLp;
-      out[i] = amp * shimmer * tone + breathGain * y + hissGain * hiss;
+      out[i] = tg * tone + breathGain * y2 + hissGain * hiss;
     }
     hzPrev = hz;
+    toneGainPrev = toneGain;
     if ((b & 1023) === 0) onProgress?.(b / nBlocks);
   }
 

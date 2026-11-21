@@ -42,3 +42,34 @@ Measured with the same tools plus per-note onset statistics (18 steady notes).
 ### Known limits found
 - Melody finder searches 110–1760 Hz (fine for songs). Whistles above ~1.8 kHz as *input* are tracked an octave low.
 - Not yet listened to by the developer: all judgements are measurements; the owner's ears decide.
+
+## Third reference: a 98 s whistling cover of a pop song (2026-11-22) + re-check of all references
+Tools: `tools/whistle_articulation.py` (note transitions, starts, ends), `tools/whistle_micro.py`
+(complex demodulation of the fundamental: pitch/loudness fluctuation per frequency band),
+`tools/whistle_skirt.py` (breath noise next to the pitch). Values are medians; the synth column is
+the app rendering Twinkle Twinkle after this round.
+
+| Property | Owner | Web clips | Cover | Synth now |
+|---|---|---|---|---|
+| Note changes with silence | 72 % | 64–83 % | 71–75 % | ~60 % |
+| Tongued dips / slurs | 0 / 28 % | 0–4 / 17–32 % | 8–10 / 15–21 % | 0–12 / 31–42 %* |
+| Silence length | 110 ms | 155–200 ms | 120–180 ms | 120–160 ms |
+| Note end: pitch move, share falling >100 c, tail | −49 c, 20 %, 90 ms | −51…+13 c, 22–29 %, 60–125 ms | −37…+54 c, 5–29 %, 80–165 ms | −44…−113 c, 20–56 %, 60–70 ms |
+| Note start offset | −20 c | −87…−350 c | −11…−53 c | −18…−113 c |
+| Breath skirt 3–6 / 6–12 / 12–25 % from pitch | −29 / −32 / −40 dB | −15…−23 / −26…−32 / −32…−36 | −29…−32 / −34…−37 / −40…−44 | −26 / −31 / −36 |
+| Loudness flutter 8–16 / 16–32 Hz | 0.6 / 0.2 dB | 0.3 / 0.2 | 0.5–0.8 / 0.4–0.5 | 0.3 / 0.3 |
+| Pitch wobble 4–8 Hz | 5 c | 6–17 c | 5–7 c | 3 c |
+
+\* plateau-based metric also counts repeated same-pitch notes and scoops; planned slur share is 20 %.
+
+### Main lesson of this round
+The biggest difference was **articulation**: real whistlers stop the air (or tongue) between most notes,
+so a whistled melody is a chain of separate little notes with silences of ~0.1–0.2 s, each starting a bit
+flat and often ending with a small fall. The previous synth slurred ~94 % of note changes into one
+continuous line, which is what an instrument/theremin does. Also fixed: block-rate amplitude steps
+(zipper noise), breath noise that was ~10 dB too wide around the pitch (now a 4th-order band-pass),
+and fast turbulent loudness/pitch flutter that was missing.
+
+### Data policy
+Only the owner's own recording may ever be shipped as audio. Web clips and the cover are used for
+measurements only (numbers in this file), never bundled.
