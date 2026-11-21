@@ -27,12 +27,14 @@ interface Voice {
   slopeCents: number; // slow drift across the note, cents per second
   vibScale: number; // 0 = straight tone
   glideSec: number;
-  scoop: number; // 0..1 of scoopCents
+  scoopCents: number; // flat start, recovered over scoopSec (0 = none)
+  bend: Float32Array | null;
+  bendHopSec: number;
   breath: number;
   decay: number; // loudness fade across the note
 }
 
-function buildVoices(notes: Note[], rnd: () => number): Voice[] {
+function buildVoices(notes: Note[], rnd: () => number, human: number): Voice[] {
   const sorted = [...notes].sort((a, b) => a.start - b.start);
   const voices: Voice[] = [];
   const centered = (): number => rnd() + rnd() - 1; // triangular, -1..1
@@ -60,12 +62,14 @@ function buildVoices(notes: Note[], rnd: () => number): Voice[] {
       gain: Math.min(1, Math.max(0.05, n.gain * (1 + WHISTLE.gainSpread * centered()))),
       glideFrom,
       fresh,
-      pitchOffCents: WHISTLE.intonationCents * centered(),
-      slopeCents: WHISTLE.driftCentsPerSec * centered(),
+      pitchOffCents: human * WHISTLE.intonationCents * centered(),
+      slopeCents: human * WHISTLE.driftCentsPerSec * centered(),
       // Short notes are usually straight; longer ones sometimes get vibrato.
-      vibScale: dur < 0.35 || rnd() > WHISTLE.vibratoShare ? 0 : 0.5 + 0.8 * rnd(),
-      glideSec: 0.03 + 0.05 * rnd(),
-      scoop: rnd() < 0.25 ? 0.1 : 0.4 + 0.6 * rnd(),
+      vibScale: human === 0 || dur < 0.35 || rnd() > WHISTLE.vibratoShare ? 0 : 0.5 + 0.8 * rnd(),
+      glideSec: 0.04 + 0.07 * rnd(),
+      scoopCents: human > 0 && rnd() < WHISTLE.scoopProb ? WHISTLE.scoopMinCents + (WHISTLE.scoopMaxCents - WHISTLE.scoopMinCents) * rnd() : 0,
+      bend: n.bend ?? null,
+      bendHopSec: n.bendHopSec ?? 0.02,
       breath: 0.8 + 0.7 * rnd(),
       decay: 0.2 * rnd(),
     });
@@ -78,16 +82,23 @@ const smoothstep = (x: number): number => {
   return c * c * (3 - 2 * c);
 };
 
+export interface RenderOptions {
+  /** false = clean tone: no random pitch/loudness character (used by tests). Default true. */
+  humanize?: boolean;
+}
+
 export function renderWhistle(
   notes: Note[],
   durationSec: number,
   sr: number,
   onProgress?: (fraction: number) => void,
+  opts: RenderOptions = {},
 ): Float32Array {
+  const human = opts.humanize === false ? 0 : 1;
   const total = Math.max(1, Math.ceil((durationSec + WHISTLE.releaseSec * 3) * sr));
   const out = new Float32Array(total);
   const rnd = mulberry32(WHISTLE.seed);
-  const voices = buildVoices(notes, rnd);
+  const voices = buildVoices(notes, rnd, human);
   const BLOCK = 32;
   const blockSec = BLOCK / sr;
 
@@ -160,12 +171,18 @@ export function renderWhistle(
     let noteCents = 0; // per-note intonation error and slow slope
     if (active && v) {
       noteCents = v.pitchOffCents + v.slopeCents * Math.min(tn, 1.5);
-      if (v.fresh) shape = -WHISTLE.scoopCents * v.scoop * (1 - smoothstep(tn / WHISTLE.scoopSec));
+      if (v.fresh) shape = -v.scoopCents * (1 - smoothstep(tn / WHISTLE.scoopSec));
+      if (v.bend && v.bend.length > 0) {
+        const pos = Math.min(v.bend.length - 1, tn / v.bendHopSec);
+        const i0 = Math.floor(pos);
+        const i1 = Math.min(v.bend.length - 1, i0 + 1);
+        shape += human * WHISTLE.bendShare * (v.bend[i0]! + (v.bend[i1]! - v.bend[i0]!) * (pos - i0));
+      }
     } else if (vi > 0) {
       shape = -WHISTLE.sagCents * smoothstep((t - voices[vi - 1]!.end) / WHISTLE.releaseSec);
       noteCents = voices[vi - 1]!.pitchOffCents;
     }
-    const cents = vibCents + wander + drift * 2 + WHISTLE.pressureCents * press + noteCents + shape;
+    const cents = vibCents + human * (wander + drift * 2 + WHISTLE.pressureCents * press) + noteCents + shape;
     const hz = Math.exp(logHz) * Math.pow(2, cents / 1200);
     const shimmer = 1 + 0.03 * vibRamp * vibSin;
 

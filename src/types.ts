@@ -5,6 +5,12 @@ export interface Note {
   /** MIDI note number (69 = A4 = 440 Hz). */
   midi: number;
   gain: number;
+  /**
+   * Optional expression carried over from the source (portamento, vibrato, scoops):
+   * pitch deviation in cents from `midi`, sampled every `bendHopSec` from `start`.
+   */
+  bend?: Float32Array;
+  bendHopSec?: number;
 }
 
 /** Frame-level melody estimate. `midi` is NaN where no melody was found. */

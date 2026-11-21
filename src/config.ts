@@ -27,6 +27,8 @@ export const ANALYSIS = {
 } as const;
 
 export const NOTES = {
+  /** Keep this much of the source's in-note pitch movement (clamped), see Note.bend. */
+  bendMaxCents: 120,
   /** Hysteresis before a new pitch is accepted (semitones). */
   hysteresis: 0.65,
   minNoteSec: 0.08,
@@ -44,9 +46,9 @@ export const WHISTLE = {
   centerMidi: 83.2, // ~ 1000 Hz
   minMidi: 70, // ~ 466 Hz
   maxMidi: 94, // ~ 1480 Hz
-  maxGlideGapSec: 0.06,
-  attackSec: 0.025,
-  releaseSec: 0.1,
+  maxGlideGapSec: 0.12,
+  attackSec: 0.02,
+  releaseSec: 0.06,
   /** Overtones relative to the fundamental: measured -40 dB (2nd) and -58 dB (3rd). */
   harmonic2: 0.01,
   harmonic3: 0.0015,
@@ -59,15 +61,22 @@ export const WHISTLE = {
   wanderCents: 6,
   /** Breath-pressure fluctuation: couples a little pitch and loudness movement. */
   pressureCents: 7,
-  pressureAmp: 0.12,
+  pressureAmp: 0.2,
   /** Per-note "human error": each note gets its own random character. */
   intonationCents: 9,
   /** Notes drift in pitch while held: measured up to ~200 cents/second. */
-  driftCentsPerSec: 200,
+  driftCentsPerSec: 260,
   gainSpread: 0.14,
-  /** Onsets show no consistent scoop in the reference; only a small random one. */
-  scoopCents: 20,
-  scoopSec: 0.06,
+  /**
+   * Onsets: in web clips 56 % of notes start flat (median -70 c, quartile -165 c) and recover in ~90 ms;
+   * the owner's own whistle scoops less. We scoop about half the notes by 40-190 cents.
+   */
+  scoopProb: 0.5,
+  scoopMinCents: 40,
+  scoopMaxCents: 190,
+  scoopSec: 0.09,
+  /** How much of the source's own pitch movement (Note.bend) the whistle follows. */
+  bendShare: 0.7,
   /** No consistent sag at the end of notes in the reference. */
   sagCents: 8,
   /** Airy skirt around the pitch (measured about -33 dB). */

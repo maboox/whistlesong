@@ -46,6 +46,8 @@ export function segmentNotes(track: MelodyTrack): Note[] {
         end: f * hopSec,
         midi: snapped[t]!,
         gain: Math.min(1, 0.35 + 0.65 * Math.sqrt(Math.min(1, mean / 0.9))),
+        bend: extractBend(midi, s, f, snapped[t]!),
+        bendHopSec: hopSec,
       });
     }
     t = e;
@@ -71,5 +73,26 @@ function splitOnReattack(level: Float32Array, s: number, e: number, minFrames: n
     }
   }
   out.push([segStart, e]);
+  return out;
+}
+
+/** Pitch deviation (cents) of the raw track from the snapped note: keeps the source's expression. */
+function extractBend(midi: Float32Array, s: number, e: number, note: number): Float32Array {
+  const raw = new Float32Array(e - s);
+  let last = 0;
+  for (let i = s; i < e; i++) {
+    const m = midi[i]!;
+    const dev = Number.isNaN(m) ? last : Math.max(-NOTES.bendMaxCents, Math.min(NOTES.bendMaxCents, (m - note) * 100));
+    raw[i - s] = dev;
+    last = dev;
+  }
+  // 3-point median removes tracker spikes without flattening real vibrato.
+  const out = new Float32Array(raw.length);
+  for (let i = 0; i < raw.length; i++) {
+    const a = raw[Math.max(0, i - 1)]!;
+    const b = raw[i]!;
+    const c = raw[Math.min(raw.length - 1, i + 1)]!;
+    out[i] = Math.max(Math.min(a, b), Math.min(Math.max(a, b), c));
+  }
   return out;
 }

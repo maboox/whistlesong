@@ -30,6 +30,22 @@ describe("melody analysis", () => {
   // Known limitation (see docs/ROADMAP.md, phase 4): a 93 ms analysis window smears tiny dips.
   it.todo("splits back-to-back repeated notes with almost no gap");
 
+  it("keeps the source's expression as a bend curve", () => {
+    // 5 Hz vibrato of +-40 cents on a held E5.
+    const sr = SR, n = sr * 2;
+    const x = new Float32Array(n);
+    let ph = 0;
+    for (let i = 0; i < n; i++) {
+      const hz = midiToHz(76) * Math.pow(2, (40 * Math.sin(2 * Math.PI * 5 * (i / sr))) / 1200);
+      ph += (2 * Math.PI * hz) / sr;
+      x[i] = 0.3 * (Math.sin(ph) + 0.4 * Math.sin(2 * ph) + 0.2 * Math.sin(3 * ph));
+    }
+    const notes = segmentNotes(extractMelody(x, SR));
+    expect(notes.length).toBe(1);
+    const bend = notes[0]!.bend!;
+    expect(Math.max(...bend) - Math.min(...bend)).toBeGreaterThan(40);
+  });
+
   it("does not split a steady note", () => {
     const notes = segmentNotes(extractMelody(tone(SR, 2, [{ hz: midiToHz(64), start: 0.1, end: 1.9, amp: 0.3 }]), SR));
     expect(notes.length).toBe(1);
@@ -56,8 +72,16 @@ describe("whistle synth", () => {
     expect(Math.max(...a.map(Math.abs))).toBeLessThanOrEqual(1);
   });
 
-  it("round-trips: analysing the whistle recovers the notes", () => {
+  it("humanised render stays within musical tolerance of the notes", () => {
     const audio = renderWhistle(notes, 2, SR);
+    const found = segmentNotes(extractMelody(audio, SR));
+    // Natural drift/scoops may split or blur a note, but the main pitches must be present.
+    const pitches = new Set(found.map((n) => n.midi));
+    for (const m of [84, 88, 91]) expect(pitches.has(m)).toBe(true);
+  });
+
+  it("round-trips: analysing the whistle recovers the notes", () => {
+    const audio = renderWhistle(notes, 2, SR, undefined, { humanize: false });
     const found = segmentNotes(extractMelody(audio, SR));
     // whistle range is above the analysis range (fMax 1760 Hz ~ MIDI 93) so these are in range
     expect(found.map((n) => n.midi)).toEqual([84, 88, 91]);
